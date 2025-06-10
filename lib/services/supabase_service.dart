@@ -3,6 +3,8 @@ import 'package:rxdart/rxdart.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'dart:math';
+import 'package:gifter_club_mobile/models/supabase_models.dart';
 
 /// Service wrapping Supabase client operations.
 class SupabaseService {

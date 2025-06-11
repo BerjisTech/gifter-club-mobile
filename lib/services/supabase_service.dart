@@ -13,16 +13,18 @@ class SupabaseService {
   final SupabaseClient supabaseAdmin;
 
   /// Emits the current authenticated user.
-  final BehaviorSubject<User?> _userSubject = BehaviorSubject<User?>.seeded(null);
+  final BehaviorSubject<User?> _userSubject = BehaviorSubject<User?>.seeded(
+    null,
+  );
   Stream<User?> get user$ => _userSubject.stream;
 
   /// Initializes Supabase clients and auth state listener.
   SupabaseService()
-      : supabase = Supabase.instance.client,
-        supabaseAdmin = SupabaseClient(
-          dotenv.env['SUPABASE_URL']!,
-          dotenv.env['SUPABASE_SERVICE_ROLE_KEY']!,
-        );
+    : supabase = Supabase.instance.client,
+      supabaseAdmin = SupabaseClient(
+        dotenv.env['SUPABASE_URL']!,
+        dotenv.env['SUPABASE_SERVICE_ROLE_KEY']!,
+      );
 
   /// Initializes authentication: loads current user and listens for auth changes.
   Future<void> initializeAuth() async {
@@ -48,7 +50,12 @@ class SupabaseService {
   /// Sign in via Google OAuth.
   Future<void> signInWithGoogle() async {
     try {
-      await supabase.auth.signInWithOAuth(Provider.google);
+      // Redirect back to the mobile app via deep link or web via env redirect URL
+      final redirectTo = dotenv.env['SUPABASE_REDIRECT_URL'];
+      await supabase.auth.signInWithOAuth(
+        Provider.google,
+        redirectTo: redirectTo,
+      );
     } catch (e) {
       print('Error signing in with Google: $e');
     }
@@ -65,24 +72,21 @@ class SupabaseService {
 
   /// Ensure a profile exists for newly signed-in users and updates email.
   Future<void> handleProfile(User user) async {
+    // Ensure profile exists and is up-to-date
     try {
-      final resp = await supabase
+      final data = await supabase
           .from('profiles')
           .select('id, email')
           .eq('user_id', user.id)
           .maybeSingle();
-      if (resp.error != null) {
-        print('Error checking profile: ${resp.error!.message}');
-        return;
-      }
-      final data = resp.data;
       if (data == null) {
         final username = _generateUsername(user);
-        final name = (user.userMetadata?['full_name'] as String?) ??
+        final name =
+            (user.userMetadata?['full_name'] as String?) ??
             (user.userMetadata?['name'] as String?) ??
             '';
         final image = (user.userMetadata?['avatar_url'] as String?) ?? '';
-        final insert = await supabase.from('profiles').insert({
+        await supabase.from('profiles').insert({
           'user_id': user.id,
           'email': user.email,
           'username': username,
@@ -96,33 +100,28 @@ class SupabaseService {
           'gifter_level_name': '',
           'gifts_sent': 0,
         });
-        if (insert.error != null) {
-          print('Error creating profile: ${insert.error!.message}');
-        }
       } else {
         final existingEmail = data['email'] as String?;
         final newEmail = user.email ?? '';
         if (existingEmail != newEmail) {
-          final upd = await supabase
+          await supabase
               .from('profiles')
               .update({'email': newEmail})
               .eq('user_id', user.id);
-          if (upd.error != null) {
-            print('Error updating profile email: ${upd.error!.message}');
-          }
         }
       }
     } catch (e) {
-      print('Unexpected error handling profile: $e');
+      print('Error handling profile: $e');
     }
   }
 
   String _generateUsername(User user) {
-    final base = ((user.userMetadata?['full_name'] as String?) ??
-            user.email?.split('@').first ??
-            'user')
-        .trim()
-        .toLowerCase();
+    final base =
+        ((user.userMetadata?['full_name'] as String?) ??
+                user.email?.split('@').first ??
+                'user')
+            .trim()
+            .toLowerCase();
     final slug = base
         .replaceAll(RegExp(r'\s+'), '-')
         .replaceAll(RegExp(r'[^a-z0-9-_]'), '');
@@ -139,30 +138,34 @@ class SupabaseService {
 
   /// Fetch a profile by its user_id.
   Future<Profile?> getProfileByUserId(String userId) async {
-    final resp = await supabase
-        .from('profiles')
-        .select()
-        .eq('user_id', userId)
-        .maybeSingle();
-    if (resp.error != null) {
-      print('Error fetching profile by user ID: ${resp.error!.message}');
+    try {
+      final data = await supabase
+          .from('profiles')
+          .select()
+          .eq('user_id', userId)
+          .maybeSingle();
+      if (data == null) return null;
+      return Profile.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      print('Error fetching profile by user ID: $e');
       return null;
     }
-    return resp.data as Profile?;
   }
 
   /// Fetch a profile by username.
   Future<Profile?> getProfileByUsername(String username) async {
-    final resp = await supabase
-        .from('profiles')
-        .select()
-        .eq('username', username)
-        .maybeSingle();
-    if (resp.error != null) {
-      print('Error fetching profile by username: ${resp.error!.message}');
+    try {
+      final data = await supabase
+          .from('profiles')
+          .select()
+          .eq('username', username)
+          .maybeSingle();
+      if (data == null) return null;
+      return Profile.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      print('Error fetching profile by username: $e');
       return null;
     }
-    return resp.data as Profile?;
   }
 
   /// Update profile fields for the given or current user.
@@ -172,71 +175,91 @@ class SupabaseService {
   }) async {
     final uid = userId ?? _userSubject.value?.id;
     if (uid == null) return null;
-    final resp = await supabase
-        .from('profiles')
-        .update(updates)
-        .eq('user_id', uid)
-        .select()
-        .maybeSingle();
-    if (resp.error != null) {
-      print('Error updating profile: ${resp.error!.message}');
+    try {
+      final data = await supabase
+          .from('profiles')
+          .update(updates)
+          .eq('user_id', uid)
+          .select()
+          .maybeSingle();
+      if (data == null) return null;
+      return Profile.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      print('Error updating profile: $e');
       return null;
     }
-    return resp.data as Profile?;
   }
 
   /// Fetch gifts with pagination.
   Future<List<Gift>> getGifts({int limit = 12, int offset = 0}) async {
-    final resp = await supabase
-        .from('gifts')
-        .select()
-        .order('id', ascending: false)
-        .range(offset, offset + limit - 1);
-    if (resp.error != null) {
-      print('Error fetching gifts: ${resp.error!.message}');
+    try {
+      final data = await supabase
+          .from('gifts')
+          .select()
+          .order('id', ascending: false)
+          .range(offset, offset + limit - 1);
+      return (data as List)
+          .map((e) => Gift.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('Error fetching gifts: $e');
       return [];
     }
-    return (resp.data as List).cast<Gift>();
   }
 
   /// Fetch wishlists for a user.
   Future<List<Wishlist>> getWishlistByUserId(String userId) async {
-    final resp = await supabase.from('wishlists').select().eq('user_id', userId);
-    if (resp.error != null) {
-      print('Error fetching wishlist: ${resp.error!.message}');
+    try {
+      final data = await supabase
+          .from('wishlists')
+          .select()
+          .eq('user_id', userId);
+      return (data as List)
+          .map((e) => Wishlist.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('Error fetching wishlist: $e');
       return [];
     }
-    return (resp.data as List).cast<Wishlist>();
   }
 
   /// Get total and fulfilled wishlist counts for a user.
   Future<Map<String, int>> getUserWishlistCount(String userId) async {
-    final resp = await supabase
-        .from('wishlists')
-        .select('id, is_fulfilled', const FetchOptions(count: CountOption.exact))
-        .eq('user_id', userId);
-    if (resp.error != null) {
-      print('Error fetching wishlist count: ${resp.error!.message}');
+    try {
+      final resp = await supabase
+          .from('wishlists')
+          .select(
+            'id, is_fulfilled',
+            const FetchOptions(count: CountOption.exact),
+          )
+          .eq('user_id', userId);
+      final data = resp.data as List? ?? [];
+      final total = resp.count ?? 0;
+      final fulfilled = data
+          .where((i) => (i as Map<String, dynamic>)['is_fulfilled'] == true)
+          .length;
+      return {'total': total, 'fulfilled': fulfilled};
+    } catch (e) {
+      print('Error fetching wishlist count: $e');
       return {'total': 0, 'fulfilled': 0};
     }
-    final data = resp.data ?? [];
-    final total = resp.count ?? 0;
-    final fulfilled = data.where((i) => i['is_fulfilled'] == true).length;
-    return {'total': total, 'fulfilled': fulfilled};
   }
 
   /// Fetch withdrawal requests for a user.
   Future<List<WithdrawalRequest>> getWithdrawalsByUser(String userId) async {
-    final resp = await supabase
-        .from('withdrawals')
-        .select()
-        .eq('user_id', userId)
-        .order('created_at', ascending: false);
-    if (resp.error != null) {
-      print('Error fetching withdrawals: ${resp.error!.message}');
+    try {
+      final data = await supabase
+          .from('withdrawals')
+          .select()
+          .eq('user_id', userId)
+          .order('created_at', ascending: false);
+      return (data as List)
+          .map((e) => WithdrawalRequest.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('Error fetching withdrawals: $e');
       return [];
     }
-    return (resp.data as List).cast<WithdrawalRequest>();
   }
 
   /// Fetch recent gifts for user or global.
@@ -244,46 +267,56 @@ class SupabaseService {
     int limit = 50,
     String? userId,
   }) async {
-    var query = supabase
-        .from('recent_gifts')
-        .select()
-        .order('created_at', ascending: false)
-        .limit(limit);
-    final resp = await query;
-    if (resp.error != null) {
-      print('Error fetching recent gifts: ${resp.error!.message}');
+    try {
+      final data = await supabase
+          .from('recent_gifts')
+          .select()
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return (data as List)
+          .map((e) => RecentGift.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('Error fetching recent gifts: $e');
       return [];
     }
-    return (resp.data as List).cast<RecentGift>();
   }
-  
+
   /// Fetch gifts received by a specific user.
-  Future<List<RecentGift>> getGiftsReceivedByUser(String userId, {int limit = 50}) async {
-    final resp = await supabase
-        .from('recent_gifts')
-        .select()
-        .eq('receiver_id', userId)
-        .order('created_at', ascending: false)
-        .limit(limit);
-    if (resp.error != null) {
-      print('Error fetching received gifts: ${resp.error!.message}');
+  Future<List<RecentGift>> getGiftsReceivedByUser(
+    String userId, {
+    int limit = 50,
+  }) async {
+    try {
+      final data = await supabase
+          .from('recent_gifts')
+          .select()
+          .eq('receiver_id', userId)
+          .order('created_at', ascending: false)
+          .limit(limit);
+      return (data as List)
+          .map((e) => RecentGift.fromJson(e as Map<String, dynamic>))
+          .toList();
+    } catch (e) {
+      print('Error fetching received gifts: $e');
       return [];
     }
-    return (resp.data as List).cast<RecentGift>();
   }
 
   /// Record a token transaction.
   Future<TokenTransaction?> recordTokenTransaction(TokenTransaction tx) async {
-    final resp = await supabase
-        .from('token_transactions')
-        .insert(tx.toJson())
-        .select()
-        .maybeSingle();
-    if (resp.error != null) {
-      print('Error recording token transaction: ${resp.error!.message}');
+    try {
+      final data = await supabase
+          .from('token_transactions')
+          .insert(tx.toJson())
+          .select()
+          .maybeSingle();
+      if (data == null) return null;
+      return TokenTransaction.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      print('Error recording token transaction: $e');
       return null;
     }
-    return resp.data as TokenTransaction?;
   }
 
   /// Update a token transaction record.
@@ -291,17 +324,19 @@ class SupabaseService {
     String id,
     Map<String, dynamic> updates,
   ) async {
-    final resp = await supabase
-        .from('token_transactions')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .maybeSingle();
-    if (resp.error != null) {
-      print('Error updating token transaction: ${resp.error!.message}');
+    try {
+      final data = await supabase
+          .from('token_transactions')
+          .update(updates)
+          .eq('id', id)
+          .select()
+          .maybeSingle();
+      if (data == null) return null;
+      return TokenTransaction.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      print('Error updating token transaction: $e');
       return null;
     }
-    return resp.data as TokenTransaction?;
   }
 
   /// Invoke an Edge Function to process token purchase.
@@ -329,19 +364,30 @@ class SupabaseService {
     String paymentMethod,
     Map<String, dynamic> paymentDetails,
   ) async {
-    final resp = await supabase.rpc('request_withdrawal', params: {
-      'p_user_id': userId,
-      'p_tokens': tokens,
-      'p_target_currency': targetCurrency,
-      'p_exchange_rate': exchangeRate,
-      'p_payment_method': paymentMethod,
-      'p_payment_details': paymentDetails,
-    });
-    if (resp.error != null) {
-      print('Error requesting withdrawal: ${resp.error!.message}');
+    try {
+      final resp = await supabase.rpc(
+        'request_withdrawal',
+        params: {
+          'p_user_id': userId,
+          'p_tokens': tokens,
+          'p_target_currency': targetCurrency,
+          'p_exchange_rate': exchangeRate,
+          'p_payment_method': paymentMethod,
+          'p_payment_details': paymentDetails,
+        },
+      );
+      if (resp.error != null) {
+        print('Error requesting withdrawal: ${resp.error!.message}');
+        return null;
+      }
+      final data = resp.data;
+      return data == null
+          ? null
+          : WithdrawalRequest.fromJson(data as Map<String, dynamic>);
+    } catch (e) {
+      print('Error requesting withdrawal: $e');
       return null;
     }
-    return resp.data as WithdrawalRequest?;
   }
 
   /// Create a notification record.
@@ -351,28 +397,31 @@ class SupabaseService {
     String? referenceId,
     required String message,
   }) async {
-    final resp = await supabase.from('notifications').insert({
-      'user_id': userId,
-      'type': type,
-      'reference_id': referenceId,
-      'message': message,
-    });
-    if (resp.error != null) {
-      print('Error creating notification: ${resp.error!.message}');
+    try {
+      await supabase.from('notifications').insert({
+        'user_id': userId,
+        'type': type,
+        'reference_id': referenceId,
+        'message': message,
+      });
+    } catch (e) {
+      print('Error creating notification: $e');
     }
   }
 
-  /// Record an authentication log for the user.
+  /// Record an authentication log for the user via Edge Function.
   Future<void> recordAuthLog(User user) async {
     try {
-      await supabase.from('auth_logs').insert({
-        'user_id': user.id,
-        'email': user.email,
-        'event': 'signed_in',
-        'timestamp': DateTime.now().toIso8601String(),
-      });
+      // Capture provider and device info similar to Angular implementation
+      final provider = user.appMetadata['provider'] as String? ?? 'unknown';
+      // Mark client type (e.g. for Flutter web/mobile)
+      final device = 'flutter-client';
+      await supabase.functions.invoke(
+        'auth-log',
+        body: {'user_id': user.id, 'provider': provider, 'device': device},
+      );
     } catch (e) {
-      print('Error recording auth log: $e');
+      print('Error recording auth log via Edge Function: $e');
     }
   }
 }

@@ -53,7 +53,7 @@ class SupabaseService {
       // Redirect back to the mobile app via deep link or web via env redirect URL
       final redirectTo = dotenv.env['SUPABASE_REDIRECT_URL'];
       await supabase.auth.signInWithOAuth(
-        Provider.google,
+        OAuthProvider.google,
         redirectTo: redirectTo,
       );
     } catch (e) {
@@ -228,11 +228,9 @@ class SupabaseService {
     try {
       final resp = await supabase
           .from('wishlists')
-          .select(
-            'id, is_fulfilled',
-            const FetchOptions(count: CountOption.exact),
-          )
-          .eq('user_id', userId);
+          .select('id, is_fulfilled')
+          .eq('user_id', userId)
+          .count(CountOption.exact);
       final data = resp.data as List? ?? [];
       final total = resp.count ?? 0;
       final fulfilled = data
